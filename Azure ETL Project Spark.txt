@@ -1,0 +1,593 @@
+1. Declare source and destination:
+
+
+
+sourceaccountName = "datalake11212"
+
+sourcecontainer = "raw"
+
+sourceLinkedService = "LS_Datalake_ManagedIdentity"
+
+sourceFile_location = "ingest/"
+
+
+
+
+
+=========================
+
+
+
+2. Create a linked service for ADLS
+
+
+
+Ensure Synapse analytics have "Storage blob data contributor" access
+
+
+
+=========================
+
+
+
+3. Code to get access to ADLS using managed identity
+
+
+
+spark.conf.set('spark.storage.synapse.linkedServiceName', "<Linked Service Name>")
+
+spark.conf.set('fs.azure.account.oauth.provider.type', 'com.microsoft.azure.synapse.tokenlibrary.LinkedServiceBasedTokenProvider')
+
+
+
+path = f'abfss://{sourcecontainer}@{sourceaccountName}.dfs.core.windows.net/'
+
+
+
+print(path)
+
+mssparkutils.fs.ls(path)
+
+
+
+
+
+===========================
+
+
+
+4. Reading all files from ADLS ingest location
+
+
+
+file = f'abfss://{sourcecontainer}@{sourceaccountName}.dfs.core.windows.net/{sourceFile_location}'
+
+print(file)
+
+source_df = spark.read.format('csv')\
+
+                        .option('header','true')\
+
+                        .option('inferschema','true')\
+
+                        .load(file)
+
+
+
+
+
+===========================
+
+
+
+5. Lets first do printSchema to know about the columns
+
+
+
+source_df.printSchema()
+
+
+
+
+
+============================
+
+6. First lets check for duplicate values
+
+
+
+source_df.groupBy(source_df.columns).count().filter(col("count")>1).show()
+
+
+
+This will show the count of rows
+
+
+
+============================
+
+7. Lets remove the duplicate values
+
+
+
+
+
+First lets copy our original dataframe:
+
+>> df_nodups = source_df
+
+
+
+To remove duplicates we need to use drop_duplicates function:
+
+>> df_nodups = df_nodups.drip_duplicates()
+
+Lets see the count again:
+
+>> df_nodups.groupBy(df_nodups.columns).count().filter(col("count")>1).show()
+
+
+
+
+
+Now it will return no values which indicates there are no duplicate values
+
+
+
+
+
+==============================
+
+8. Now lets check for NULLs in all columns
+
+
+
+
+
+First lets check for one particular column
+
+
+
+df_nodups.filter(df_nodups.Title.isNull()).show()
+
+
+
+
+
+============
+
+
+
+Now in a realworld there can be 40+ columns for a table
+
+to check for null value count for all columns
+
+
+
+
+
+To get count of NULL values for all columns:
+
+
+
+df.select([count(when(isnan(c) | col(c).isNull(), c)).alias(c) for c in df.columns]
+
+   ).show()
+
+
+
+===========
+
+
+
+
+
+breakdown of above code:
+
+
+
+df_nodups.select(\
+
+        [count(\
+
+            when(isnan(c) | col(c).isNull(), c)\
+
+             ).alias(c) for c in df_nodups.columns]
+
+        ).show()
+
+
+
+if there are NULL values
+
+
+
+We can see some entire rows have NULLs
+
+
+
+
+
+=========================
+
+
+
+9. Removing Rows only if there are NULLs in entire row
+
+
+
+
+
+##--- Drop only if entire row is NULL
+
+df_nodups.na.drop(how='all').show()
+
+
+
+----------------------------
+
+
+
+Now lets assign this to same data frame
+
+
+
+df_nodups =  df_nodups.na.drop(how='all')
+
+
+
+
+
+----------------------------
+
+
+
+
+
+Lets see the count again
+
+
+
+
+
+df_nodups.select(\
+
+        [count(\
+
+            when(isnan(c) | col(c).isNull(), c)\
+
+             ).alias(c) for c in df_nodups.columns]
+
+        ).show()
+
+
+
+
+
+=========================
+
+
+
+10. Replacing NULL values
+
+
+
+Here we should see NULL values in Language
+
+
+
+We cannot remove rows , we should handle the NULL values to some other values
+
+
+
+Lets replace the NULL with Unknown
+
+
+
+>> df_nonulls = df_nodups.na.fill(value='Unknown',subset="Language")
+
+
+
+----------------
+
+
+
+Lets try to check count
+
+
+
+>> df_nonulls.filter(col('Language').isNull()).show()
+
+
+
+
+
+----------------
+
+
+
+To check if they are replaced
+
+
+
+>> df_nonulls.filter(col('Language') == 'Unknown').show()
+
+
+
+This will show all rows where langauge is Unknown
+
+
+
+
+
+
+
+To check for Genre
+
+
+
+>> df_nonulls.filter(col('Genre') == 'Unknown').show()
+
+
+
+=========================
+
+
+
+11. Creating new column based on IMDB Rating --> IMDB Category
+
+
+
+
+
+##- Creating new column based on IMDB sourcecontainer
+
+
+
+df_nonulls.withColumn("IMDB Category",\
+
+           when(col("IMDB Score").between(1,2.9),"Very Low")\
+
+           .when(col("IMDB Score").between(3,4.9) , "Low")\
+
+           .when(col("IMDB Score").between(5,7.9), "Medium")\
+
+           .otherwise("High")
+
+).show()
+
+
+
+---------------------------
+
+lets assign to df
+
+
+
+df = df_nonulls.withColumn("IMDB Category",\
+
+           when(col("IMDB Score").between(1,2.9),"Very Low")\
+
+           .when(col("IMDB Score").between(3,4.9) , "Low")\
+
+           .when(col("IMDB Score").between(5,7.9), "Medium")\
+
+           .otherwise("High"))
+
+
+
+
+
+=========================
+
+12. Create a new column making runtime in mins to Runtime in hours
+
+
+
+
+
+df.withColumn('RuntimeInHours',\
+
+            round(df.Runtime/60,2)).show()
+
+
+
+---------------
+
+
+
+Lets assign to df
+
+
+
+
+
+df_new = df.withColumn('RuntimeInHours',\
+
+            round(df.Runtime/60,2))
+
+
+
+
+
+
+
+
+
+==========================
+
+
+
+13. Lets change the current Runtime column to RuntimeInMins
+
+
+
+
+
+
+
+>> df_new.withColumnRenamed("Runtime","RuntimeInMins").show()
+
+
+
+---------
+
+
+
+lets assign to same for IMDB Score as we avoid using spaces on column names
+
+
+
+>> df_new = df_new.withColumnRenamed("IMDB Score","IMDB_Score")
+
+
+
+
+
+===============================
+
+
+
+14. Adding runtime category
+
+
+
+
+
+## -- Runtime category
+
+df_new = df_new.withColumn("Runtime_Category",\
+
+           when(col("RuntimeInHours").between(0,1.30),"Short Runtime")\
+
+           .when(col("RuntimeInHours").between(1.31,2.15) , "Medium Runtime")\
+
+           .otherwise("LongRuntime"))
+
+
+
+
+
+
+
+================================
+
+
+
+15. Converting String to date datatypes
+
+
+
+We have AddedDate and ReleaseDate columns, as these are from CSV file it is showing as
+
+String type
+
+
+
+Lets change both into Date DataType
+
+
+
+
+
+For added date
+
+
+
+>> df_new.withColumn('AddedDate',\
+
+        to_date('AddedDate','dd-MM-yyyy')).show()
+
+
+
+--
+
+Assign to df_final
+
+
+
+>> df_final = df_new.withColumn('AddedDate',\
+
+        to_date('AddedDate','dd-MM-yyyy'))
+
+
+
+---------------------------
+
+For ReleaseDate
+
+
+
+>> df_final.withColumn('ReleaseDate',\
+
+        to_date('ReleaseDate','dd-MM-yyyy')).show()
+
+
+
+
+
+----
+
+Assign to df_final
+
+
+
+df_final = df_final.withColumn('ReleaseDate',\
+
+        to_date('ReleaseDate','dd-MM-yyyy'))
+
+
+
+
+
+
+
+===========================
+
+
+
+16. Writing to ADLS
+
+
+
+
+
+
+
+Add destination
+
+
+
+
+
+destiaccountName = "datalake11212"
+
+destcontainer = "refined"
+
+destinationFile = "data/"
+
+
+
+----------------------------
+
+
+
+## - Writing to ADLS Refined
+
+
+
+destpath = f'abfss://{destcontainer}@{destiaccountName}.dfs.core.windows.net/{destinationFile}'
+
+
+
+df_final.write\
+
+      .mode('overwrite')\
+
+      .format('parquet')\
+
+      .option('header','true')\
+
+      .option('inferschema','true')\
+
+      .save(destpath)

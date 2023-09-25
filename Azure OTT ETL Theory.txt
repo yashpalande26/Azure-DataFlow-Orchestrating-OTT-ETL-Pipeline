@@ -1,0 +1,17 @@
+1) 
+- Incremental Loading : (Extracting date)No repetition of file, while loading. By using Filter by last modified option.
+- Extracting name from the file name.(If file name is date, we can extract that name, if the date is equal to todays date we can consider that as today's file)
+- To load the data from on-premise DS to azure DL we have done that by incremental loading.
+
+2) 
+- synapse is having much more feature then the data factor, It can perform all the data operation like DF additional with transformation activities.
+
+3) 
+- Creating a spark spool inside our azure synAlt(To boost the performance of our big data analytics load).
+
+4)
+- Orchestrating all the pipeline, To make them automated, This can be done by the help of trigger(trigger = It is the activity which will invoke the entire pipeline)
+- 3 Type of Trigger: 1) tumbling window 2)scheduled 3)event based
+Here we are make use of a tumbling window (As we are taking data from on-premise so we can't use event based trigged)
+- tumbling window: It execute the pipeline at a pre-define periodic interval
+
